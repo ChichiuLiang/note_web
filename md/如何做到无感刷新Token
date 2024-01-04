@@ -1,0 +1,308 @@
+> 本文由 [简悦 SimpRead](http://ksria.com/simpread/) 转码， 原文地址 [mp.weixin.qq.com](https://mp.weixin.qq.com/s/q6SgW31PzQvilBQI8BMg6A)
+
+```
+往期热门文章：
+1、告别 BeanUtil.copyProperties，这款IDEA插件才是最优的替代方案！
+2、越来越多开源项目停更，Java生态受影响最大
+3、事务+锁？锁+事务？解析事务与锁的错综Bug！
+4、自从用了这款代码生成工具，项目开发效率大大提高了！
+5、Spring Boot 3.2 尝鲜，开箱即用的虚拟线程和 GraalVM
+
+```
+
+来源：juejin.cn/post/7316797749517631515
+
+  
+
+为什么需要无感刷新Token？
+---------------
+
+*   **「最近浏览到一个文章里面的提问，是这样的：」**
+    
+    当我在系统页面上做业务操作的时候会出现突然闪退的情况，然后跳转到登录页面需要重新登录系统，系统使用了Redis做缓存来存储用户ID，和用户的token信息，这是什么问题呢？
+    
+*   **「解答：」**
+    
+    突然闪退，一般都是由于你的token过期的问题，导致身份失效。
+    
+*   **「解决方案：」**
+    
+    自动刷新token
+    
+    token续约
+    
+*   **「思路」**
+    
+    如果Token即将过期，你在验证用户权限的同时，为用户生成一个新的Token并返回给客户端，客户端需要更新本地存储的Token，
+    
+    还可以做定时任务来刷新Token，可以不生成新的Token，在快过期的时候，直接给Token增加时间
+    
+
+自动刷新token
+---------
+
+自动刷新token是属于后端的解决方案，由后端来检查一个Token的过期时间是否快要过期了，如果快要过期了，就往请求头中重新
+
+放一个token，然后前端那边做拦截，拿到请求头里面的新的token，如果这个新的token和老的token不一致，直接将本地的token更换
+
+接下来拿代码举例子
+
+*   先引入依赖
+    
+
+```
+
+
+<dependency>  
+    <groupId>cn.hutool</groupId>  
+    <artifactId>hutool-all</artifactId>  
+    <version>5.5.1</version>  
+</dependency>  
+<dependency>  
+    <groupId>com.alibaba</groupId>  
+    <artifactId>fastjson</artifactId>  
+    <version>1.2.33</version>  
+</dependency>  
+<dependency>  
+    <groupId>io.jsonwebtoken</groupId>  
+    <artifactId>jjwt</artifactId>  
+    <version>0.9.1</version>  
+</dependency>  
+
+
+
+```
+
+*   这是一个生成token的例子
+    
+
+```
+
+
+import io.jsonwebtoken.Claims;  
+import io.jsonwebtoken.JwtBuilder;  
+import io.jsonwebtoken.Jwts;  
+import io.jsonwebtoken.SignatureAlgorithm;  
+  
+import javax.crypto.SecretKey;  
+import javax.crypto.spec.SecretKeySpec;  
+import java.util.Base64;  
+import java.util.Date;  
+import java.util.UUID;  
+  
+public class JwtUtil {  
+    // 有效期为  
+    public static final Long JWT_TTL = 60 * 60 * 1000 * 24;// 60 * 60 * 1000 * 24  一个小时  
+    // 设置秘钥明文 --- 自己改就行  
+    public static final String JWT_KEY = "qx";  
+   // 用于生成uuid，用来标识唯一  
+    public static String getUUID(){  
+        String uuid = UUID.randomUUID().toString().replaceAll("-", "");//token用UUID来代替  
+        return uuid;  
+    }  
+  
+    /**  
+        id      : 标识唯一  
+        subject : 我们想要加密存储的数据  
+        ttl     : 我们想要设置的过期时间  
+     */  
+  
+   // 生成token  jwt加密 subject token中要存放的数据（json格式）  
+    public static String createJWT(String subject) {  
+        JwtBuilder builder = getJwtBuilder(subject, null, getUUID());// 设置过期时间  
+        return builder.compact();  
+    }  
+  
+    // 生成token  jwt加密  
+    public static String createJWT(String subject, Long ttlMillis) {  
+        JwtBuilder builder = getJwtBuilder(subject, ttlMillis, getUUID());// 设置过期时间  
+        return builder.compact();  
+    }  
+    
+    // 创建token jwt加密  
+    public static String createJWT(String id, String subject, Long ttlMillis) {  
+        JwtBuilder builder = getJwtBuilder(subject, ttlMillis, id);// 设置过期时间  
+        return builder.compact();  
+    }  
+  
+    private static JwtBuilder getJwtBuilder(String subject, Long ttlMillis, String uuid) {  
+        SignatureAlgorithm signatureAlgorithm = SignatureAlgorithm.HS256;  
+        SecretKey secretKey = generalKey();  
+        long nowMillis = System.currentTimeMillis();  
+        Date now = new Date(nowMillis);  
+        if(ttlMillis==null){  
+            ttlMillis=JwtUtil.JWT_TTL;  
+        }  
+        long expMillis = nowMillis + ttlMillis;  
+        Date expDate = new Date(expMillis);  
+        return Jwts.builder()  
+                .setId(uuid)              //唯一的ID  
+                .setSubject(subject)   // 主题  可以是JSON数据  
+                .setIssuer("sg")     // 签发者  
+                .setIssuedAt(now)      // 签发时间  
+                .signWith(signatureAlgorithm, secretKey) //使用HS256对称加密算法签名, 第二个参数为秘钥  
+                .setExpiration(expDate);  
+    }  
+      
+    // 生成加密后的秘钥 secretKey  
+    public static SecretKey generalKey() {  
+        byte[] encodedKey = Base64.getDecoder().decode(JwtUtil.JWT_KEY);  
+        SecretKey key = new SecretKeySpec(encodedKey, 0, encodedKey.length, "AES");  
+        return key;  
+    }  
+  
+    // jwt解密  
+    public static Claims parseJWT(String jwt) throws Exception {  
+        SecretKey secretKey = generalKey();  
+        return Jwts.parser()  
+                .setSigningKey(secretKey)  
+                .parseClaimsJws(jwt)  
+                .getBody();  
+    }  
+}  
+
+
+
+```
+
+*   写个单元测试，测试一下
+    
+
+```
+
+
+@Test  
+void test() throws Exception {  
+    String token = JwtUtil.createJWT("1735209949551763457");  
+    System.out.println("Token: " + token);  
+    Date tokenExpirationDate = getTokenExpirationDate(token);  
+    System.out.println(tokenExpirationDate);  
+    System.out.println(tokenExpirationDate.toString());  
+    long exp = tokenExpirationDate.getTime();  
+    long cur = System.currentTimeMillis();  
+    System.out.println(exp);  
+    System.out.println(cur);  
+    System.out.println(exp - cur);  
+}  
+// 解析令牌并获取过期时间  
+public static Date getTokenExpirationDate(String token) {  
+    try {  
+        SecretKey secretKey = generalKey();  
+        Claims claims = Jwts.parser()  
+                .setSigningKey(secretKey)  
+                .parseClaimsJws(token)  
+                .getBody();  
+        return claims.getExpiration();  
+    } catch (ExpiredJwtException | SignatureException e) {  
+        throw new RuntimeException("Invalid token", e);  
+    }  
+}  
+
+
+
+```
+
+Token有点长，就不放全部了
+
+![图片](data:image/svg+xml,%3C%3Fxml version='1.0' encoding='UTF-8'%3F%3E%3Csvg width='1px' height='1px' viewBox='0 0 1 1' version='1.1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'%3E%3Ctitle%3E%3C/title%3E%3Cg stroke='none' stroke-width='1' fill='none' fill-rule='evenodd' fill-opacity='0'%3E%3Cg transform='translate(-249.000000, -126.000000)' fill='%23FFFFFF'%3E%3Crect x='249' y='126' width='1' height='1'%3E%3C/rect%3E%3C/g%3E%3C/g%3E%3C/svg%3E)
+
+可以看到我们的 exp 过期时间的毫秒数为 1703651262000
+
+可以看到我们的 cur 当前时间的毫秒数为 1703564863035
+
+我们将两者相减得到的值为 86398965ms，我们可以算一下一天的毫秒数是多少 1000 * 60 * 60 * 24 ms = 86400000ms
+
+这样我们就能够拿到token的过期时间tokenExpirationDate了
+
+我们就可以通过在校验token的时候，如果token校验通过了，此时我们拿到该token的过期时间，以(过期时间 - 当前时间)进行判断
+
+如果说 (过期时间 - 当前时间) 小于约定的值，那么我们就重新根据token里面的信息，重新创建一个token，将新的token放到请求头中
+
+返回给前端，前端去进行本地存储更新token
+
+前端token续约
+---------
+
+token的续约偏向于前端的解决方案，即由前端来进行token的过期时间的判断，首先前后端需要对接商量好一个token续约的接口，
+
+当前端发现这个token快要过期的时候，向后端发送该token，然后后端将该token的过期时间延长。
+
+**「前端采用的是双Token的方式，access-token 和 refresh-token即 AT 和 RT」**
+
+**「而对于纯后端的方式，就是只有access-token这一个token」**
+
+*   **「那么问题来了 AT 和 RT 到底有什么区别？为什么需要RT？」**
+    
+    **「在前端实现方案来说，RT是用来在AT即将过期的时候，用RT获取最新的token」**
+    
+    我解释一下我的观点：
+    
+    AT的暴露机会更多，每个请求都要携带，所以设置的过期时间短一点，**「减少劫持风险」**
+    
+    RT只会暴露在auth服务中用来刷新at，设置的过期时间长一点，**「增加便利性。」**
+    
+    AT 和 RT 是为了网络传输安全，网络传输中，容易暴露 AT，因为 AT 时间短，暴露后风险系数才低
+    
+    **「这种是标准的安全处理，其实已经无需探讨他的合理性，就好像 https 之于 http 一样」**
+    
+
+疑问及思考
+-----
+
+要是前端有一个表单页面，长时间不进行请求的发送，此时用户填写完表单了，再点击提交的时候，后端返回401了，怎么办？
+
+也就是说，虽然你后端可以无感刷新Token，但是你后端无感刷新Token的前提是：前端得发请求，如果用户长时间不进行页面的交互，
+
+即没有进行任何业务逻辑的跳转什么的，就单纯的往表单上面填东西，什么请求也没发的情况下，后端是无法感知Token过期的
+
+**「这种情况怎么解决？」**
+
+*   对于纯后端的解决方案，我是这样想的
+    
+    让前端在表单填写内容的时候做处理，如果提交返回的是401，那么前端就需要获取表单存在本地存储 然后跳转登录页，登录成功后
+    
+    返回这个页面，然后从本地存储取出来再回显到表单上面。
+    
+*   对于前端的解决方案，我是这样想的
+    
+    对于后端来说就是AT过期了，而对于前端来说就是AT和RT都过期了，怎么处理？
+    
+
+1.  需要监听refresh token的过期时间，在接近过期的时候向后端发起请求来刷新refresh token 或者是定期刷新一下refresh token
+    
+2.  和后端的解决方案一样，前端做一个类似草稿箱的功能对表单等元素进行保存
+    
+
+关于无状态的 JWT 到底应该怎样用？参见：`https://t.zsxq.com/15xye5IWG`。
+
+```
+
+
+**往期热门文章：**
+
+#### 
+
+1、[MyBatis的10种精妙用法，真是妙啊！](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508471&idx=1&sn=1623141801263613f93a85888b4e4e41&chksm=e9c65846deb1d150323496470f116c92029c10fcab2d9208db71935a872abab6282f1473236f&scene=21#wechat_redirect)
+
+2、[公司新来一个同事，试图在业务代码中炫技，被开了...](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508461&idx=1&sn=ef1edde456a2c8b8cf55f0569ad4b4ca&chksm=e9c6585cdeb1d14abc04ca2229ebcaa4dd2eda913ad3137acf848e2c94ce9f6886141eff1aba&scene=21#wechat_redirect)
+
+3[、大文件：如何实现秒传、断点续传、分片上传？](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508457&idx=1&sn=b0aa5b3f627bc8532793badac780d8ff&chksm=e9c65858deb1d14ee399af6f7970938927637739b7ee9d1ea98f48d80773a843b089a313f22b&scene=21#wechat_redirect)
+
+4、[彻底告别 Controller、Service、Dao，让人上瘾的开发神器...](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508450&idx=1&sn=6dcbfc0dab8f5d291ace7bd200d3640f&chksm=e9c65853deb1d145747b75a0b0e67877a4d15f49ec192f6d52a33b606c29ec825e4901114756&scene=21#wechat_redirect)
+
+5、[40 个 SpringBoot 常用注解：让生产力爆表！](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508436&idx=1&sn=22f796aad063ccd1aa55459b56195415&chksm=e9c65865deb1d173db813cf84858f0dcda426475daa25c2212e38f35d4f97bc7da3614141ecc&scene=21#wechat_redirect)
+
+6、[面试官问我 ，try catch 应该在 for 循环里面还是外面？](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508392&idx=1&sn=98429b906774f20eb845a790d4b61d95&chksm=e9c65819deb1d10f1c9c5b49fda3b49c330efcf5d642577809c2a1b491da4b5aa9571db0da6e&scene=21#wechat_redirect)
+
+7、[为什么不建议在 Docker 中跑 MySQL？](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508378&idx=1&sn=ddb0cd8cf8102ac8567de88926ea96ee&chksm=e9c6582bdeb1d13de2d9347c03af3203563de6d89d0491e0972a24ef60de40fd97ea5d950a4f&scene=21#wechat_redirect)
+
+8、[推荐一款功能强大的商城系统：Javashop，适合二次开发，100%开源！](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508371&idx=1&sn=d6f2d11b2ec00c2f2ab2518949831a43&chksm=e9c65822deb1d134cdfeece08a6a2645bff19bbb06d9ae4fdf41b0b44313ddc84a1b01fba8e0&scene=21#wechat_redirect)
+
+9、[ObjectMapper，别再像个二货一样一直new了！](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508305&idx=1&sn=2d2663a8b4718bb51e67482a7ee25ca0&chksm=e9c658e0deb1d1f63eecb624d411b1964fef6d7316100ce3e8c45154a7617fff50a77f405e01&scene=21#wechat_redirect)
+
+10、[我用Spring Boot随手封装了一个万能的 Excel 导出工具，传什么都能导出！](http://mp.weixin.qq.com/s?__biz=MzI1NDQ3MjQxNA==&mid=2247508295&idx=1&sn=f6cc3585b297cf9e3325887dc6fe1b48&chksm=e9c658f6deb1d1e0cd5bfcc4bad0abacf48cb13817df5970cc8c7c161dfa9e99d36c0296ca4a&scene=21#wechat_redirect)
+
+![图片](data:image/svg+xml,%3C%3Fxml version='1.0' encoding='UTF-8'%3F%3E%3Csvg width='1px' height='1px' viewBox='0 0 1 1' version='1.1' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'%3E%3Ctitle%3E%3C/title%3E%3Cg stroke='none' stroke-width='1' fill='none' fill-rule='evenodd' fill-opacity='0'%3E%3Cg transform='translate(-249.000000, -126.000000)' fill='%23FFFFFF'%3E%3Crect x='249' y='126' width='1' height='1'%3E%3C/rect%3E%3C/g%3E%3C/g%3E%3C/svg%3E)
+
+
+```
