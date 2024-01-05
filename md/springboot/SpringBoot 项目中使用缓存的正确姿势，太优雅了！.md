@@ -35,7 +35,18 @@
 缓存可以通过将经常访问的数据存储在内存中，减少底层数据源如数据库的压力，从而有效提高系统的性能和稳定性。我想大家的项目中或多或少都有使用过，我们项目也不例外，但是最近在 review 公司的代码的时候写的很蠢且 low, 大致写法如下：
 
 ```
-public User getById(String id) { User user = cache.getUser();    if(user != null) {        return user;    }    // 从数据库获取    user = loadFromDB(id);    cahce.put(id, user); return user;}
+public User getById(String id) {
+ User user = cache.getUser();
+    if(user != null) {
+        return user;
+    }
+    // 从数据库获取
+    user = loadFromDB(id);
+    cahce.put(id, user);
+ return user;
+}
+
+
 ```
 
 其实 Spring Boot 提供了强大的缓存抽象，可以轻松地向您的应用程序添加缓存。本文就讲讲如何使用 Spring 提供的不同缓存注解实现缓存的最佳实践。
@@ -46,7 +57,16 @@ public User getById(String id) { User user = cache.getUser();    if(
 现在大部分项目都是是 SpringBoot 项目，我们可以在启动类添加注解`@EnableCaching`来开启缓存功能。
 
 ```
-@SpringBootApplication@EnableCachingpublic class SpringCacheApp {    public static void main(String[] args) {        SpringApplication.run(Cache.class, args);    }}
+@SpringBootApplication
+@EnableCaching
+public class SpringCacheApp {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Cache.class, args);
+    }
+}
+
+
 ```
 
 既然要能使用缓存，就需要有一个缓存管理器 Bean，默认情况下，`@EnableCaching` 将注册一个`ConcurrentMapCacheManager`的 Bean，不需要单独的 bean 声明。`ConcurrentMapCacheManage`r 将值存储在`ConcurrentHashMap`的实例中，这是缓存机制的最简单的线程安全实现。
@@ -60,14 +80,42 @@ public User getById(String id) { User user = cache.getUser();    if(
     
 
 ```
-<dependency>  <groupId>org.springframework.boot</groupId>  <artifactId>spring-boot-starter-data-redis</artifactId></dependency>
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+
+
 ```
 
 2.  配置 Redis 缓存管理器
     
 
 ```
-@Configuration@EnableCachingpublic class CacheConfig {    @Bean    public RedisConnectionFactory redisConnectionFactory() {        return new LettuceConnectionFactory();    }    @Bean    public CacheManager cacheManager() {        RedisCacheConfiguration redisCacheConfiguration = RedisCacheConfiguration.defaultCacheConfig()            .disableCachingNullValues()            .serializeValuesWith(SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()));        RedisCacheManager redisCacheManager = RedisCacheManager.builder(redisConnectionFactory())            .cacheDefaults(redisCacheConfiguration)            .build();        return redisCacheManager;    }}
+@Configuration
+@EnableCaching
+public class CacheConfig {
+
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        return new LettuceConnectionFactory();
+    }
+
+    @Bean
+    public CacheManager cacheManager() {
+        RedisCacheConfiguration redisCacheConfiguration = RedisCacheConfiguration.defaultCacheConfig()
+            .disableCachingNullValues()
+            .serializeValuesWith(SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()));
+
+        RedisCacheManager redisCacheManager = RedisCacheManager.builder(redisConnectionFactory())
+            .cacheDefaults(redisCacheConfiguration)
+            .build();
+
+        return redisCacheManager;
+    }
+}
+
+
 ```
 
 现在有了缓存管理器以后，我们如何在业务层面操作缓存呢？
@@ -84,7 +132,19 @@ public User getById(String id) { User user = cache.getUser();    if(
 例子 1：缓存数据库查询的结果。
 
 ```
-@Servicepublic class MyService {    @Autowired    private MyRepository repository;    @Cacheable(value = "myCache", key = "#id")    public MyEntity getEntityById(Long id) {        return repository.findById(id).orElse(null);    }}
+@Service
+public class MyService {
+
+    @Autowired
+    private MyRepository repository;
+
+    @Cacheable(value = "myCache", key = "#id")
+    public MyEntity getEntityById(Long id) {
+        return repository.findById(id).orElse(null);
+    }
+}
+
+
 ```
 
 在此示例中，`@Cacheable` 注解用于缓存 `getEntityById()`方法的结果，该方法根据其 `ID` 从数据库中检索 MyEntity 对象。
@@ -97,7 +157,19 @@ public User getById(String id) { User user = cache.getUser();    if(
 然后`@CachePut` 出来了, 与 `@Cacheable` 注解不同的是使用 `@CachePut` 注解标注的方法，在执行前不会去检查缓存中是否存在之前执行过的结果，而是每次都会执行该方法，并将执行结果以键值对的形式写入指定的缓存中。`@CachePut` 注解一般用于更新缓存数据，相当于缓存使用的是写模式中的双写模式。
 
 ```
-@Servicepublic class MyService {    @Autowired    private MyRepository repository;    @CachePut(value = "myCache", key = "#entity.id")    public void saveEntity(MyEntity entity) {        repository.save(entity);    }}
+@Service
+public class MyService {
+
+    @Autowired
+    private MyRepository repository;
+
+    @CachePut(value = "myCache", key = "#entity.id")
+    public void saveEntity(MyEntity entity) {
+        repository.save(entity);
+    }
+}
+
+
 ```
 
 @CacheEvict
@@ -108,7 +180,19 @@ public User getById(String id) { User user = cache.getUser();    if(
 ![](https://mmbiz.qpic.cn/mmbiz_png/oH5VKTC5sLjKHsa2rSwMwVlNyzYP1yRVoqN9yDaR3CFC79hcVHa4sdHPACzKhe6ViaTnNy62qoc1j7HNJEotibAA/640?wx_fmt=png&wxfrom=5&wx_lazy=1&wx_co=1)
 
 ```
-@Servicepublic class MyService {    @Autowired    private MyRepository repository;     @CacheEvict(value = "myCache", key = "#id")    public void deleteEntityById(Long id) {        repository.deleteById(id);    }}
+@Service
+public class MyService {
+
+    @Autowired
+    private MyRepository repository;
+
+     @CacheEvict(value = "myCache", key = "#id")
+    public void deleteEntityById(Long id) {
+        repository.deleteById(id);
+    }
+}
+
+
 ```
 
 @Caching
@@ -121,13 +205,51 @@ public User getById(String id) { User user = cache.getUser();    if(
 例子 1：`@Caching`注解中的`evict`属性指定在调用方法 `saveEntity` 时失效两个缓存。
 
 ```
-@Servicepublic class MyService {    @Autowired    private MyRepository repository;    @Cacheable(value = "myCache", key = "#id")    public MyEntity getEntityById(Long id) {        return repository.findById(id).orElse(null);    }    @Caching(evict = {        @CacheEvict(value = "myCache", key = "#entity.id"),        @CacheEvict(value = "otherCache", key = "#entity.id")    })    public void saveEntity(MyEntity entity) {        repository.save(entity);    }}
+@Service
+public class MyService {
+
+    @Autowired
+    private MyRepository repository;
+
+    @Cacheable(value = "myCache", key = "#id")
+    public MyEntity getEntityById(Long id) {
+        return repository.findById(id).orElse(null);
+    }
+
+    @Caching(evict = {
+        @CacheEvict(value = "myCache", key = "#entity.id"),
+        @CacheEvict(value = "otherCache", key = "#entity.id")
+    })
+    public void saveEntity(MyEntity entity) {
+        repository.save(entity);
+    }
+
+}
+
+
 ```
 
 例子 2：调用`getEntityById`方法时，Spring 会先检查结果是否已经缓存在`myCache`缓存中。如果是，`Spring` 将返回缓存的结果而不是执行该方法。如果结果尚未缓存，Spring 将执行该方法并将结果缓存在 `myCache` 缓存中。方法执行后，Spring 会根据`@CacheEvict`注解从`otherCache`缓存中移除缓存结果。
 
 ```
-@Servicepublic class MyService {    @Caching(        cacheable = {            @Cacheable(value = "myCache", key = "#id")        },        evict = {            @CacheEvict(value = "otherCache", key = "#id")        }    )    public MyEntity getEntityById(Long id) {        return repository.findById(id).orElse(null);    }}
+@Service
+public class MyService {
+
+    @Caching(
+        cacheable = {
+            @Cacheable(value = "myCache", key = "#id")
+        },
+        evict = {
+            @CacheEvict(value = "otherCache", key = "#id")
+        }
+    )
+    public MyEntity getEntityById(Long id) {
+        return repository.findById(id).orElse(null);
+    }
+
+}
+
+
 ```
 
 例子 3：当调用`saveData`方法时，Spring 会根据`@CacheEvict`注解先从`otherCache`缓存中移除数据。然后，Spring 将执行该方法并将结果保存到数据库或外部 API。
@@ -135,7 +257,32 @@ public User getById(String id) { User user = cache.getUser();    if(
 方法执行后，Spring 会根据`@CachePut`注解将结果添加到 `myCache`、`myOtherCache` 和 `myThirdCache` 缓存中。Spring 还将根据`@Cacheable`注解检查结果是否已缓存在 `myFourthCache` 和 `myFifthCache` 缓存中。如果结果尚未缓存，Spring 会将结果缓存在适当的缓存中。如果结果已经被缓存，Spring 将返回缓存的结果，而不是再次执行该方法。
 
 ```
-@Servicepublic class MyService {    @Caching(        put = {            @CachePut(value = "myCache", key = "#result.id"),            @CachePut(value = "myOtherCache", key = "#result.id"),            @CachePut(value = "myThirdCache", key = "#result.name")        },        evict = {            @CacheEvict(value = "otherCache", key = "#id")        },        cacheable = {            @Cacheable(value = "myFourthCache", key = "#id"),            @Cacheable(value = "myFifthCache", key = "#result.id")        }    )    public MyEntity saveData(Long id, String name) {        // Code to save data to a database or external API        MyEntity entity = new MyEntity(id, name);        return entity;    }}
+@Service
+public class MyService {
+
+    @Caching(
+        put = {
+            @CachePut(value = "myCache", key = "#result.id"),
+            @CachePut(value = "myOtherCache", key = "#result.id"),
+            @CachePut(value = "myThirdCache", key = "#result.name")
+        },
+        evict = {
+            @CacheEvict(value = "otherCache", key = "#id")
+        },
+        cacheable = {
+            @Cacheable(value = "myFourthCache", key = "#id"),
+            @Cacheable(value = "myFifthCache", key = "#result.id")
+        }
+    )
+    public MyEntity saveData(Long id, String name) {
+        // Code to save data to a database or external API
+        MyEntity entity = new MyEntity(id, name);
+        return entity;
+    }
+
+}
+
+
 ```
 
 @CacheConfig
@@ -144,7 +291,30 @@ public User getById(String id) { User user = cache.getUser();    if(
 通过`@CacheConfig` 注解，我们可以将一些缓存配置简化到类级别的一个地方，这样我们就不必多次声明相关值：
 
 ```
-@CacheConfig(cacheNames={"myCache"})@Servicepublic class MyService {    @Autowired    private MyRepository repository;    @Cacheable(key = "#id")    public MyEntity getEntityById(Long id) {        return repository.findById(id).orElse(null);    }    @CachePut(key = "#entity.id")    public void saveEntity(MyEntity entity) {        repository.save(entity);    }    @CacheEvict(key = "#id")    public void deleteEntityById(Long id) {        repository.deleteById(id);    }}
+@CacheConfig(cacheNames={"myCache"})
+@Service
+public class MyService {
+
+    @Autowired
+    private MyRepository repository;
+
+    @Cacheable(key = "#id")
+    public MyEntity getEntityById(Long id) {
+        return repository.findById(id).orElse(null);
+    }
+
+    @CachePut(key = "#entity.id")
+    public void saveEntity(MyEntity entity) {
+        repository.save(entity);
+    }
+
+    @CacheEvict(key = "#id")
+    public void deleteEntityById(Long id) {
+        repository.deleteById(id);
+    }
+}
+
+
 ```
 
 Condition & Unless
@@ -156,7 +326,20 @@ Condition & Unless
     
 
 ```
-//when id >10, the @CachePut works. @CachePut(key = "#entity.id", condition="#entity.id > 10")public void saveEntity(MyEntity entity) { repository.save(entity);}//when result != null, the @CachePut works.@CachePut(key = "#id", condition="#result == null")public void saveEntity1(MyEntity entity) { repository.save(entity);}
+//when id >10, the @CachePut works. 
+@CachePut(key = "#entity.id", condition="#entity.id > 10")
+public void saveEntity(MyEntity entity) {
+ repository.save(entity);
+}
+
+
+//when result != null, the @CachePut works.
+@CachePut(key = "#id", condition="#result == null")
+public void saveEntity1(MyEntity entity) {
+ repository.save(entity);
+}
+
+
 ```
 
 清理全部缓存
@@ -165,7 +348,19 @@ Condition & Unless
 通过`allEntries`、`beforeInvocation`属性可以来清除全部缓存数据，不过`allEntries`是方法调用后清理，`beforeInvocation`是方法调用前清理。
 
 ```
-//方法调用完成之后，清理所有缓存@CacheEvict(value="myCache",allEntries=true)public void delectAll() {    repository.deleteAll();}//方法调用之前，清除所有缓存@CacheEvict(value="myCache",beforeInvocation=true)public void delectAll() {    repository.deleteAll();}
+//方法调用完成之后，清理所有缓存
+@CacheEvict(value="myCache",allEntries=true)
+public void delectAll() {
+    repository.deleteAll();
+}
+
+//方法调用之前，清除所有缓存
+@CacheEvict(value="myCache",beforeInvocation=true)
+public void delectAll() {
+    repository.deleteAll();
+}
+
+
 ```
 
 SpEL 表达式
