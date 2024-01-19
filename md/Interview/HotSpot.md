@@ -1,0 +1,2 @@
+HotSpot JVM最广泛的实现 OracleJDK和OpenJDK默认JVM的实现
+基于即时编译技术的JVM实现，高性能和优化能力
